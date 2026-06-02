@@ -98,13 +98,19 @@ The hello nodes are scaffolding used to validate the full communication pipeline
 ├── Dockerfile                  # ros:humble + colcon + zenoh-bridge (linux/arm64)
 ├── docker-compose.yml          # container definition, port 7447
 ├── src/
-│   └── hello_ros2/             # scaffold package (publisher, subscriber, marker)
-│       ├── hello_ros2/
-│       │   ├── publisher.py
-│       │   ├── subscriber.py
-│       │   └── marker_publisher.py
+│   ├── hello_ros2/             # Python scaffold package (publisher, subscriber, marker)
+│   │   ├── hello_ros2/
+│   │   │   ├── publisher.py
+│   │   │   ├── subscriber.py
+│   │   │   └── marker_publisher.py
+│   │   ├── package.xml
+│   │   └── setup.py
+│   └── hello_cpp/              # C++ scaffold package (publisher, subscriber)
+│       ├── src/
+│       │   ├── publisher.cpp
+│       │   └── subscriber.cpp
 │       ├── package.xml
-│       └── setup.py
+│       └── CMakeLists.txt
 ├── config/
 │   └── cyclonedds_macos.xml    # CycloneDDS loopback config (AllowMulticast=spdp)
 ├── bin/                        # gitignored — populated by download_zenoh.sh
@@ -171,13 +177,13 @@ docker exec -it ros2_dev bash -c "
   source /opt/ros/humble/setup.bash &&
   ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765"
 
-# Terminal 4 — publisher node
+# Terminal 4 — Python publisher node
 docker exec -it ros2_dev bash -c "
   source /opt/ros/humble/setup.bash &&
   source /ros2_ws/install/setup.bash &&
   ros2 run hello_ros2 publisher"
 
-# Terminal 5 — subscriber node
+# Terminal 5 — Python subscriber node
 docker exec -it ros2_dev bash -c "
   source /opt/ros/humble/setup.bash &&
   source /ros2_ws/install/setup.bash &&
@@ -188,6 +194,18 @@ docker exec -it ros2_dev bash -c "
   source /opt/ros/humble/setup.bash &&
   source /ros2_ws/install/setup.bash &&
   ros2 run hello_ros2 marker_publisher"
+
+# Terminal 7 — C++ publisher node
+docker exec -it ros2_dev bash -c "
+  source /opt/ros/humble/setup.bash &&
+  source /ros2_ws/install/setup.bash &&
+  ros2 run hello_cpp publisher"
+
+# Terminal 8 — C++ subscriber node (receives from C++ publisher)
+docker exec -it ros2_dev bash -c "
+  source /opt/ros/humble/setup.bash &&
+  source /ros2_ws/install/setup.bash &&
+  ros2 run hello_cpp subscriber"
 
 # Terminal 7 — open Foxglove Studio (native macOS app)
 open /Applications/Foxglove.app
