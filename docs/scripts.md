@@ -1,6 +1,6 @@
 # Scripts Reference
 
-All scripts live in `scripts/` and exist because ROS2 nodes run inside Docker while the macOS host needs its own tools (CLI, RViz2) to interact with them. Each script handles a specific piece of that setup.
+All scripts live in `scripts/` and exist because ROS2 nodes run inside Docker while the macOS host needs its own tools (CLI, Foxglove Studio) to interact with them. Each script handles a specific piece of that setup.
 
 ---
 
@@ -10,7 +10,7 @@ All scripts live in `scripts/` and exist because ROS2 nodes run inside Docker wh
 1. download_zenoh.sh   # once, after cloning
 2. docker compose up -d
 3. start_bridge.sh     # keep running in a dedicated terminal
-4. ros2.sh / rviz2.sh  # use freely in other terminals
+4. ros2.sh             # use freely in other terminals
 ```
 
 ---
@@ -34,7 +34,7 @@ Launches the Zenoh bridge in two halves:
 | Docker (router) | Server | Listens on port 7447, exposes ROS2 topics from inside the container |
 | macOS (client) | Consumer | Connects to `localhost:7447` via Docker's port-forward, receives those topics |
 
-Both sides use `ROS_DOMAIN_ID=42` and `--no-multicast-scouting` (TCP-only, no UDP broadcast). Without this script running, `ros2.sh` and `rviz2.sh` see no topics from Docker.
+Both sides use `ROS_DOMAIN_ID=42` and `--no-multicast-scouting` (TCP-only, no UDP broadcast). Without this script running, `ros2.sh` and Foxglove Studio see no topics from Docker.
 
 ---
 
@@ -54,16 +54,6 @@ Fixes three macOS-specific problems:
 1. **Homebrew Python pollution** — clears `PYTHONPATH` so Homebrew's Python 3.14+ doesn't break rclpy's C extension loading.
 2. **Daemon hang** — passes `--no-daemon` to graph-query verbs (`topic list`, `node list`, etc.) so they don't wait 8–60 s for the ROS2 daemon. Streaming verbs (`hz`, `bw`, `pub`) don't get this flag — they never use the daemon.
 3. **DDS interface** — sets `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` and points CycloneDDS at the loopback interface (`lo0`) via `config/cyclonedds_macos.xml`, matching what the Zenoh bridge uses.
-
----
-
-## rviz2.sh
-
-**Wrapper to launch RViz2 without manual `conda activate`.**
-
-Manually sets all env vars that `conda activate ros2` would normally provide (`AMENT_PREFIX_PATH`, `ROS_DISTRO`, `PYTHONPATH`, `PATH`), plus the same CycloneDDS config used by `ros2.sh`. This means RViz2 sees exactly the same topics the bridge is forwarding.
-
-Warns on launch if `start_bridge.sh` is not running.
 
 ---
 

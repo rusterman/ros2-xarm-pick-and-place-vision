@@ -1,11 +1,11 @@
-# ROS2 Pub/Sub Architecture & RViz2 — Big Picture
+# ROS2 Pub/Sub Architecture & Foxglove Studio — Big Picture
 
 ## Table of Contents
 1. [The Big Picture](#the-big-picture)
 2. [Core Concepts](#core-concepts)
 3. [How Nodes Communicate (DDS)](#how-nodes-communicate-dds)
 4. [Node-by-Node Breakdown](#node-by-node-breakdown)
-5. [How RViz2 Fits In](#how-rviz2-fits-in)
+5. [How Foxglove Studio Fits In](#how-foxglove-studio-fits-in)
 6. [Event Loop](#event-loop)
 7. [Full System Flow](#full-system-flow)
 
@@ -24,8 +24,8 @@ In ROS2 every program is a **node** — an independent process with a name. Node
 │  └──────────────────┘                   └───────────────────┘  │
 │                                                                 │
 │  ┌──────────────────┐  /visualization_  ┌───────────────────┐  │
-│  │ MarkerPublisher  │     marker        │      RViz2        │  │
-│  └──────────────────┘ ────────────────► │   (also a node)   │  │
+│  │ MarkerPublisher  │     marker        │  Foxglove Studio  │  │
+│  └──────────────────┘ ────────────────► │  (also a node)    │  │
 │                                         └───────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -125,7 +125,7 @@ Key details:
 
 ### MarkerPublisher (`marker_publisher.py`)
 
-**Role:** publishes a 3D cube every second so RViz2 can display it.
+**Role:** publishes a 3D cube every second so Foxglove Studio can display it.
 
 ```
 Every 1.0 s
@@ -148,29 +148,37 @@ log to terminal: "Marker published at (0, 0, 0.5)"
 Key details:
 - Topic: `/visualization_marker`
 - Message type: `visualization_msgs/Marker`
-- `frame_id = 'map'` — tells RViz2 which coordinate system to use
+- `frame_id = 'map'` — tells Foxglove which coordinate system to use
 - `marker.id = 0` + `marker.ns = 'hello_ros2'` — unique identity so updates overwrite instead of duplicate
 - `marker.action = Marker.ADD` — create or update the marker
-- `lifetime.sec = 2` — marker disappears from RViz2 automatically if the publisher stops
+- `lifetime.sec = 2` — marker disappears from Foxglove automatically if the publisher stops
 
 ---
 
-## How RViz2 Fits In
+## How Foxglove Studio Fits In
 
-RViz2 is **not special** — it is just another ROS2 node that happens to have a 3D rendering window.
-
-It subscribes to well-known topic names using the exact same API you use in your own nodes:
+Foxglove Studio is **not special** — under the hood it connects to a `foxglove_bridge` node running inside Docker, which subscribes to topics using the exact same API you use in your own nodes:
 
 ```python
-# What RViz2 does internally when you add a Marker display:
-self.create_subscription(Marker, '/visualization_marker', self.render_callback, 10)
+# What foxglove_bridge does internally:
+self.create_subscription(Marker, '/visualization_marker', self.forward_over_websocket, 10)
 ```
 
-### What RViz2 can visualize
+Foxglove Studio itself is a **native macOS app** that receives topic data over WebSocket (`ws://localhost:8765`) — no X11, no display server, no `conda activate` required.
 
-RViz2 only understands **visual message types**. Plain `String` messages have no visual meaning and are not shown.
+### Why Foxglove over RViz2 for this project
 
-| Topic | Message type | What RViz2 shows |
+| Concern | RViz2 | Foxglove Studio |
+|---|---|---|
+| Running inside Docker on macOS | Requires X11 / VNC — painful on Apple Silicon | Native app, connects via WebSocket |
+| 3D markers, point clouds, TF | Yes | Yes |
+| Plotting DL inference scores over time | No | Yes (plot panel) |
+| State machine / pick-place monitoring | No | Yes (custom panels) |
+| Logs alongside 3D view | No | Yes |
+
+### What Foxglove can visualize
+
+| Topic | Message type | What Foxglove shows |
 |---|---|---|
 | `/visualization_marker` | `visualization_msgs/Marker` | 3D shapes: cube, sphere, arrow, etc. |
 | `/scan` | `sensor_msgs/LaserScan` | Lidar sweep as dots |
@@ -178,16 +186,16 @@ RViz2 only understands **visual message types**. Plain `String` messages have no
 | `/tf` | `tf2_msgs/TFMessage` | Coordinate frame axes |
 | `/map` | `nav_msgs/OccupancyGrid` | 2D occupancy grid map |
 
-### How to connect RViz2 to your marker
+### How to connect Foxglove to your marker
 
 ```
-1. Run:  ros2 run hello_ros2 marker_publisher
-2. Run:  rviz2
-3. In RViz2 UI:
-   - Set Fixed Frame → "map"
-   - Click Add → By topic → /visualization_marker → Marker → OK
-4. A green cube appears at (0, 0, 0.5) and refreshes every second
-5. Stop the publisher → cube disappears after 2 seconds (lifetime)
+1. Run:  ros2 run hello_ros2 marker_publisher  (inside Docker)
+2. Open: Foxglove Studio (native macOS app)
+3. Connect → Open Connection → WebSocket → ws://localhost:8765
+4. Add panel → 3D → set Fixed Frame = "map"
+5. Subscribe to /visualization_marker
+6. A green cube appears at (0, 0, 0.5) and refreshes every second
+7. Stop the publisher → cube disappears after 2 seconds (lifetime)
 ```
 
 ---
@@ -222,14 +230,15 @@ Putting it all together when all three programs run simultaneously:
 
 ```
 t=0s
-  MarkerPublisher starts  → announces /visualization_marker
-  HelloPublisher starts   → announces /hello_topic
-  HelloSubscriber starts  → subscribes to /hello_topic
-  RViz2 starts            → subscribes to /visualization_marker
+  MarkerPublisher starts    → announces /visualization_marker
+  HelloPublisher starts     → announces /hello_topic
+  HelloSubscriber starts    → subscribes to /hello_topic
+  Foxglove Studio opens     → connects via ws://localhost:8765
+                              subscribes to /visualization_marker
 
   DDS auto-connects:
     HelloPublisher      ↔ HelloSubscriber
-    MarkerPublisher     ↔ RViz2
+    MarkerPublisher     ↔ foxglove_bridge → Foxglove Studio
 
 t=1s
   HelloPublisher timer fires
@@ -238,23 +247,23 @@ t=1s
 
   MarkerPublisher timer fires
     → publishes green cube Marker on /visualization_marker
-    → RViz2 render callback fires: draws cube at (0,0,0.5)
+    → Foxglove renders cube at (0,0,0.5)
 
 t=2s  (same pattern repeats)
   ...
 
 t=Ns  (publisher stopped)
   No new Marker published
-  After 2 seconds: cube disappears from RViz2 (lifetime expired)
+  After 2 seconds: cube disappears from Foxglove (lifetime expired)
 ```
 
 ---
 
 ## Summary
 
-| | HelloPublisher | HelloSubscriber | MarkerPublisher | RViz2 |
+| | HelloPublisher | HelloSubscriber | MarkerPublisher | Foxglove Studio |
 |---|---|---|---|---|
-| **Node name** | `hello_publisher` | `hello_subscriber` | `marker_publisher` | `rviz2` |
+| **Node name** | `hello_publisher` | `hello_subscriber` | `marker_publisher` | `foxglove_bridge` |
 | **Role** | Publishes text | Receives text | Publishes 3D shape | Visualizes 3D data |
 | **Topic** | `/hello_topic` (write) | `/hello_topic` (read) | `/visualization_marker` (write) | `/visualization_marker` (read) |
 | **Driven by** | 1s timer | incoming messages | 1s timer | incoming messages |

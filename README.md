@@ -37,7 +37,7 @@ Cheese placed into moving grid container
 |---|---|
 | Robot middleware | ROS2 Humble |
 | Simulation | Gazebo |
-| Visualization | RViz2 |
+| Visualization | Foxglove Studio |
 | Computer vision | OpenCV |
 | Object detection | Deep learning (Python) |
 | Motion planning | C++17 ROS2 nodes |
@@ -55,7 +55,7 @@ C++ is used for real-time, performance-critical nodes (motion planning, trajecto
 
 ```
 macOS (Apple Silicon)
-├── RViz2                     ← visualizes robot state, markers, camera feed
+├── Foxglove Studio           ← visualizes robot state, markers, camera feed
 ├── Gazebo                    ← physics simulation
 ├── ros2 CLI                  ← topic inspection, node management
 ├── zenoh-bridge (client)     ← bridges DDS over TCP
@@ -77,13 +77,13 @@ Docker container: ros2_dev    (linux/arm64 image)
 
 Docker Desktop on macOS runs containers inside a Linux VM. The container's bridge IP is unreachable from the host, so raw DDS multicast/unicast does not work across the boundary. Zenoh bridges ROS2 topics over TCP — which Docker port-forwarding supports cleanly.
 
-RViz2 and Gazebo run natively on macOS (via RoboStack conda) to get GPU/display access, while compute-heavy ROS2 nodes run inside Docker.
+Foxglove Studio and Gazebo run natively on macOS to get GPU/display access, while compute-heavy ROS2 nodes run inside Docker. Foxglove connects to the container via `foxglove_bridge` over WebSocket — no X11 or display server required.
 
 ### Current node graph (initial commit)
 
 ```
 HelloPublisher  ──/hello_topic──►  HelloSubscriber
-MarkerPublisher ──/visualization_marker──►  RViz2
+MarkerPublisher ──/visualization_marker──►  Foxglove Studio
 ```
 
 The hello nodes are scaffolding used to validate the full communication pipeline (Docker → Zenoh → macOS) before real nodes are built on top.
@@ -112,10 +112,9 @@ The hello nodes are scaffolding used to validate the full communication pipeline
 │   ├── download_zenoh.sh       # downloads macOS Zenoh bridge binary (run once)
 │   ├── start_bridge.sh         # starts Docker router + macOS client bridge
 │   ├── ros2.sh                 # ros2 CLI wrapper (fixes Homebrew Python conflict)
-│   └── rviz2.sh                # RViz2 launcher with correct AMENT_PREFIX_PATH
 └── docs/
     ├── DESIGN.md
-    ├── ros2-pubsub-rviz-architecture.md
+    ├── ros2-pubsub-foxglove-architecture.md
     ├── cyclonedds_macos.md
     ├── rmw-ros2-middleware.md
     ├── ros2-package-files.md
@@ -129,7 +128,8 @@ The hello nodes are scaffolding used to validate the full communication pipeline
 
 - **Docker Desktop for Mac** (Apple Silicon build) — [download](https://www.docker.com/products/docker-desktop/)
 - **Miniforge** with a `ros2` conda environment (RoboStack, ROS2 Humble)
-  - RViz2, Gazebo, and the `ros2` CLI run here natively on macOS
+  - Gazebo and the `ros2` CLI run here natively on macOS
+- **Foxglove Studio** — [download](https://foxglove.dev/download) — native macOS app, connects via WebSocket
 
 ---
 
@@ -175,15 +175,15 @@ docker exec -it ros2_dev bash -c "
   source /ros2_ws/install/setup.bash &&
   ros2 run hello_ros2 subscriber"
 
-# Terminal 5 — marker publisher (visible in RViz2)
+# Terminal 5 — marker publisher (visible in Foxglove)
 docker exec -it ros2_dev bash -c "
   source /opt/ros/humble/setup.bash &&
   source /ros2_ws/install/setup.bash &&
   ros2 run hello_ros2 marker_publisher"
 
-# Terminal 6 — RViz2 (native macOS)
-./scripts/rviz2.sh
-# In RViz2: Fixed Frame = "map", Add → Marker → /visualization_marker
+# Terminal 6 — open Foxglove Studio (native macOS app)
+# Connect to: ws://localhost:8765
+# Add panel → 3D → set Fixed Frame = "map" → subscribe to /visualization_marker
 ```
 
 ### Inspect topics from macOS
@@ -231,7 +231,7 @@ docker compose down
 - [ ] Gripper controller node (C++)
 - [ ] Moving grid container simulation (conveyor belt)
 - [ ] End-to-end pick and place demo
-- [ ] RViz2 custom dashboard (detections, trajectory preview)
+- [ ] Foxglove Studio dashboard (detections, trajectory preview, state machine monitor)
 
 ---
 

@@ -32,7 +32,7 @@ class MarkerPublisher(Node):
         marker.color.b = 0.2
         marker.color.a = 1.0
 
-        # disappears after 2 s if publisher stops — keeps RViz2 clean
+        # disappears after 2 s if publisher stops — keeps Foxglove clean
         marker.lifetime.sec = 2
 
         self.pub.publish(marker)

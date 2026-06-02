@@ -26,7 +26,7 @@ This is the core fix — it prevents the 3x duplication on macOS loopback.
 <ParticipantIndex>auto</ParticipantIndex>
 ```
 Auto-assign a unique port index to each ROS2 process. Avoids port collisions when multiple tools
-run simultaneously (`rviz2`, `ros2 topic list`, zenoh bridge, etc.).
+run simultaneously (`ros2 topic list`, Foxglove Studio, zenoh bridge, etc.).
 
 ## One-line summary
 

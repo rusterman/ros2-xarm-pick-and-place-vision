@@ -7,7 +7,7 @@ ROS2 nodes communicate using **DDS** (Data Distribution Service) — a pub/sub p
 Docker Desktop on macOS does **not** run containers on the host network. Containers live inside a hidden Linux VM with their own virtual network. macOS cannot receive DDS broadcast traffic from that VM, so:
 
 - `ros2 topic list` from macOS sees nothing
-- RViz2 sees no topics
+- Foxglove Studio sees no topics
 - Nodes inside Docker and tools on macOS are completely invisible to each other
 
 ## Why the obvious fixes don't work
@@ -34,7 +34,7 @@ The bridge is officially maintained by Eclipse and increasingly integrated into 
 
 ```
 macOS
-  RViz2 / ros2 CLI
+  Foxglove Studio / ros2 CLI
        ↕ DDS (loopback)
   zenoh-bridge [client]          ← bin/zenoh-bridge-ros2dds (macOS binary)
        ↕ TCP localhost:7447

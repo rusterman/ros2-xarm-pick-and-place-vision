@@ -6,7 +6,7 @@
 
 ```
 src/
-├── hello_ros2/    ← package 1: string pub/sub + RViz2 marker
+├── hello_ros2/    ← package 1: string pub/sub + Foxglove marker
 └── sensor_sim/    ← package 2: temperature sensor + alerts
 ```
 
