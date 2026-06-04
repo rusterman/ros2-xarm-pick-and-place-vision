@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y \
     ros-humble-tf2-ros \
     ros-humble-tf2-geometry-msgs \
     ros-humble-foxglove-bridge \
+    ros-humble-robot-state-publisher \
+    ros-humble-joint-state-publisher \
     curl \
     unzip \
     && rm -rf /var/lib/apt/lists/*

@@ -2,7 +2,7 @@
 
 A ROS2 robotic system for **detecting, picking, and placing cheese objects into a moving grid container** using computer vision and deep learning. Built with a fully containerized architecture that runs on **macOS (Apple Silicon / M chips)** out of the box.
 
-> **Status:** Active development — initial infrastructure complete, vision pipeline and manipulation in progress.
+> **Status:** Active development — infrastructure complete, xArm6 robot model integrated, vision pipeline and manipulation in progress.
 
 ---
 
@@ -23,7 +23,7 @@ Pose estimation → ROS2 topic
 Motion planner (C++) → joint trajectory
     │
     ▼
-Robot arm execution
+Robot arm execution (xArm6)
     │
     ▼
 Cheese placed into moving grid container
@@ -36,16 +36,18 @@ Cheese placed into moving grid container
 | Layer | Technology |
 |---|---|
 | Robot middleware | ROS2 Humble |
-| Simulation | Gazebo |
-| Visualization | Foxglove Studio |
+| Robot hardware | UFACTORY xArm6 (6-DOF collaborative arm) |
+| Visualization | Foxglove Studio (via WebSocket bridge) |
 | Computer vision | OpenCV |
 | Object detection | Deep learning (Python) |
-| Motion planning | C++17 ROS2 nodes |
+| Motion planning | MoveIt2 + C++17 ROS2 nodes |
 | Orchestration | Python ROS2 nodes |
 | Container runtime | Docker (linux/arm64 — M chip native) |
 | macOS bridge | Zenoh (TCP bridge over Docker port-forward) |
 
 C++ is used for real-time, performance-critical nodes (motion planning, trajectory execution). Python is used for perception, deep learning inference, and high-level orchestration.
+
+No Gazebo — the real xArm6 hardware is available from day one. Foxglove replaces the Gazebo GUI for visualization: robot model (URDF), TF frames, camera feed, and topic data are all visible in Foxglove over WebSocket.
 
 ---
 
@@ -56,7 +58,6 @@ C++ is used for real-time, performance-critical nodes (motion planning, trajecto
 ```
 macOS (Apple Silicon)
 ├── Foxglove Studio           ← connects via WebSocket ws://localhost:8765
-├── Gazebo                    ← physics simulation
 ├── ros2 CLI                  ← topic inspection, node management
 ├── zenoh-bridge (client)     ← bridges DDS over TCP
 │       │
@@ -65,6 +66,8 @@ macOS (Apple Silicon)
 Docker container: ros2_dev    (linux/arm64 image)
 ├── foxglove_bridge           ← WebSocket server port 8765, bridges topics to Foxglove
 ├── zenoh-bridge (router)     ← port 7447
+├── robot_state_publisher     ← publishes TF frames from xArm6 URDF
+├── joint_state_publisher     ← publishes joint states
 ├── ROS2 nodes (FastDDS, domain 42)
 │   ├── camera_node           ← publishes raw image stream
 │   ├── detection_node        ← deep learning inference, publishes detections
@@ -78,16 +81,16 @@ Docker container: ros2_dev    (linux/arm64 image)
 
 Docker Desktop on macOS runs containers inside a Linux VM. The container's bridge IP is unreachable from the host, so raw DDS multicast/unicast does not work across the boundary. Zenoh bridges ROS2 topics over TCP — which Docker port-forwarding supports cleanly.
 
-Foxglove Studio and Gazebo run natively on macOS to get GPU/display access, while compute-heavy ROS2 nodes run inside Docker. Foxglove connects to the container via `foxglove_bridge` over WebSocket — no X11 or display server required.
+Foxglove Studio connects to the container via `foxglove_bridge` over WebSocket — no X11 or display server required. The robot 3D model, TF tree, and all sensor topics are visible in Foxglove's panels.
 
-### Current node graph (initial commit)
+### Current node graph
 
 ```
-HelloPublisher  ──/hello_topic──►  HelloSubscriber
-MarkerPublisher ──/visualization_marker──►  Foxglove Studio
+robot_state_publisher ──/tf, /tf_static──► Foxglove Studio (3D panel)
+joint_state_publisher ──/joint_states───► robot_state_publisher
+HelloPublisher        ──/hello_topic───► HelloSubscriber
+MarkerPublisher       ──/visualization_marker──► Foxglove Studio
 ```
-
-The hello nodes are scaffolding used to validate the full communication pipeline (Docker → Zenoh → macOS) before real nodes are built on top.
 
 ---
 
@@ -95,9 +98,23 @@ The hello nodes are scaffolding used to validate the full communication pipeline
 
 ```
 .
-├── Dockerfile                  # ros:humble + colcon + zenoh-bridge (linux/arm64)
-├── docker-compose.yml          # container definition, port 7447
+├── Dockerfile                  # ros:humble + colcon + zenoh-bridge + robot-state-publisher
+├── docker-compose.yml          # container definition, ports 7447 and 8765
 ├── src/
+│   ├── xarm_description/       # xArm6 URDF + mesh files (arm links)
+│   │   ├── urdf/
+│   │   │   └── xarm6_with_gripper.urdf
+│   │   ├── meshes/xarm6/
+│   │   │   ├── visual/         # STL files for Foxglove rendering
+│   │   │   └── collision/      # OBJ files for collision detection
+│   │   ├── launch/
+│   │   │   └── display.launch.py
+│   │   ├── package.xml
+│   │   └── setup.py
+│   ├── xarm_gripper/           # xArm gripper mesh files
+│   │   ├── meshes/             # STL files for gripper fingers and knuckles
+│   │   ├── package.xml
+│   │   └── setup.py
 │   ├── hello_ros2/             # Python scaffold package (publisher, subscriber, marker)
 │   │   ├── hello_ros2/
 │   │   │   ├── publisher.py
@@ -111,6 +128,7 @@ The hello nodes are scaffolding used to validate the full communication pipeline
 │       │   └── subscriber.cpp
 │       ├── package.xml
 │       └── CMakeLists.txt
+├── xarm/                       # Original URDF files provided by UFACTORY (reference only)
 ├── config/
 │   └── cyclonedds_macos.xml    # CycloneDDS loopback config (AllowMulticast=spdp)
 ├── bin/                        # gitignored — populated by download_zenoh.sh
@@ -135,7 +153,7 @@ The hello nodes are scaffolding used to validate the full communication pipeline
 
 - **Docker Desktop for Mac** (Apple Silicon build) — [download](https://www.docker.com/products/docker-desktop/)
 - **Miniforge** with a `ros2` conda environment (RoboStack, ROS2 Humble)
-  - Gazebo and the `ros2` CLI run here natively on macOS
+  - The `ros2` CLI runs here natively on macOS
 - **Foxglove Studio** — [download](https://foxglove.dev/download) — native macOS app, connects via WebSocket
 
 ---
@@ -159,6 +177,37 @@ docker exec ros2_dev bash -c "
   source /opt/ros/humble/setup.bash &&
   cd /ros2_ws &&
   colcon build --symlink-install"
+```
+
+---
+
+## Visualizing the xArm6 Robot in Foxglove
+
+```bash
+# Terminal 1 — start the container (if not already running)
+docker compose up -d
+
+# Terminal 2 — build the xarm packages (first time only)
+docker exec -it ros2_dev bash -c "
+  cd /ros2_ws &&
+  colcon build --packages-select xarm_description xarm_gripper"
+
+# Terminal 3 — start foxglove_bridge
+docker exec -it ros2_dev bash -c "
+  source /opt/ros/humble/setup.bash &&
+  ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765"
+
+# Terminal 4 — launch the robot state publisher
+docker exec -it ros2_dev bash -c "
+  source /opt/ros/humble/setup.bash &&
+  source /ros2_ws/install/setup.bash &&
+  ros2 launch xarm_description display.launch.py"
+
+# Open Foxglove Studio
+open /Applications/Foxglove.app
+# Connect: Open Connection → Foxglove WebSocket → ws://localhost:8765
+# Add panel → 3D → subscribe to /tf and /tf_static
+# The xArm6 with gripper will render in its default (zero-angles) pose
 ```
 
 ---
@@ -201,13 +250,13 @@ docker exec -it ros2_dev bash -c "
   source /ros2_ws/install/setup.bash &&
   ros2 run hello_cpp publisher"
 
-# Terminal 8 — C++ subscriber node (receives from C++ publisher)
+# Terminal 8 — C++ subscriber node
 docker exec -it ros2_dev bash -c "
   source /opt/ros/humble/setup.bash &&
   source /ros2_ws/install/setup.bash &&
   ros2 run hello_cpp subscriber"
 
-# Terminal 7 — open Foxglove Studio (native macOS app)
+# Open Foxglove Studio (native macOS app)
 open /Applications/Foxglove.app
 # In Foxglove: Open Connection → Foxglove WebSocket → ws://localhost:8765 → Open
 # IMPORTANT: select "Foxglove WebSocket", NOT "Rosbridge WebSocket"
@@ -251,13 +300,13 @@ docker compose down
 
 ## Roadmap
 
-- [ ] URDF robot model + Gazebo simulation
+- [x] URDF robot model integrated (xArm6 + gripper, visualized in Foxglove)
 - [ ] Camera node (simulated + real)
 - [ ] Deep learning cheese detection node (Python)
 - [ ] 3D pose estimation from depth image
 - [ ] C++ motion planning node (MoveIt2)
 - [ ] Gripper controller node (C++)
-- [ ] Moving grid container simulation (conveyor belt)
+- [ ] Moving grid container tracking (conveyor belt)
 - [ ] End-to-end pick and place demo
 - [ ] Foxglove Studio dashboard (detections, trajectory preview, state machine monitor)
 

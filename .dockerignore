@@ -1,28 +1,57 @@
-# Nothing is COPYed in the Dockerfile — everything is either fetched at build
-# time (apt, curl) or mounted as a volume at runtime. Exclude all local files
-# to keep the build context minimal and avoid sending large/irrelevant files
+# ── Nothing is COPYed in the Dockerfile ──────────────────────
+# src and config are mounted as volumes at runtime.
+# Everything below is excluded to keep the build context
+# minimal and avoid sending large or irrelevant files
 # to the Docker daemon.
 
-# macOS zenoh binary — 15 MB, wrong arch for Linux anyway
-bin/
-
-# Source and config — mounted as volumes, not COPYed
-src/
-config/
-
-# Git history and tooling
+# ── Git ───────────────────────────────────────────────────────
 .git/
 .gitignore
 .dockerignore
 
-# Scripts — not used inside the image
-scripts/
+# ── macOS ─────────────────────────────────────────────────────
+.DS_Store
+**/.DS_Store
 
-# Docs
+# ── Claude Code internal ──────────────────────────────────────
+.claude/
+
+# ── macOS binary (wrong arch for Linux, ~15 MB) ───────────────
+bin/
+
+# ── Mounted as volumes at runtime, not COPYed ─────────────────
+src/
+config/
+
+# ── ROS2 build artifacts ──────────────────────────────────────
+build/
+install/
+log/
+
+# ── Python cache ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+
+# ── C++ build artifacts ───────────────────────────────────────
+*.o
+*.so
+*.a
+CMakeCache.txt
+CMakeFiles/
+
+# ── Editor and IDE ────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Docs and scripts (not needed inside container) ────────────
 docs/
+scripts/
 README.md
 
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
+# ── Temporary xarm reference files ───────────────────────────
+xarm/
