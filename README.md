@@ -2,7 +2,7 @@
 
 A ROS2 robotic system for **detecting, picking, and placing cheese slices into a moving grid container** using computer vision and motion planning. Built with a fully containerized architecture that runs on **macOS (Apple Silicon / M chips)** out of the box.
 
-> **Status:** Active development — infrastructure complete, xArm6 robot model integrated and animated in Foxglove, perception pipeline and manipulation in progress.
+> **Status:** Active development — infrastructure complete, xArm6 robot model integrated and animated in Foxglove. Gazebo Classic 11 simulation (amd64 container) now renders a real camera feed of the arm into Foxglove and a real Gazebo GUI into the browser via noVNC. Perception pipeline and manipulation in progress.
 
 ---
 
@@ -45,10 +45,12 @@ Cheese placed into correct grid slot
 | Visualization | Foxglove Studio (via WebSocket bridge) |
 | Computer vision | OpenCV + PCL (geometric detection, no AI/ML) |
 | Motion planning | MoveIt2 |
-| Container runtime | Docker (linux/arm64 — M chip native) |
+| Container runtime | Docker (linux/amd64 — emulated on Apple Silicon, required for Gazebo Classic's apt dependency chain) |
+| Simulation | Gazebo Classic 11 (`gazebo_ros_pkgs`) — headless, Xvfb + Mesa software rendering |
+| Remote GUI | noVNC (`x11vnc` + `websockify`) — view the real Gazebo GUI in a browser |
 | macOS bridge | Zenoh (TCP bridge over Docker port-forward) |
 
-**No Gazebo, no AI/ML.** The real xArm6 hardware is available from day one. Foxglove replaces Gazebo for visualization. Object detection uses geometric PCL processing — sufficient for geometrically consistent cheese slices within a batch.
+**No AI/ML.** The real xArm6 hardware is available from day one. Gazebo Classic provides a real rendered camera feed (not synthetic) for visualization in Foxglove and direct GUI access via noVNC; object detection uses geometric PCL processing — sufficient for geometrically consistent cheese slices within a batch.
 
 ---
 
@@ -122,6 +124,7 @@ Docker Desktop on macOS runs containers inside a Linux VM. The container's bridg
 │   └── ros2.sh                 # ros2 CLI wrapper (fixes Homebrew Python conflict)
 └── docs/
     ├── ARCHITECTURE.md         # full system architecture document
+    ├── GAZEBO_SIMULATION.md    # Gazebo install/launch logic, diagrams, and why each choice was made
     └── ...
 ```
 
@@ -212,6 +215,59 @@ docker exec -it ros2_dev bash -c "
 
 ---
 
+## Gazebo Classic Simulation (Real Rendered Camera + Browser GUI)
+
+Runs the xArm6 + Orbbec camera inside a real physics/rendering simulation (Gazebo Classic 11), with the camera's actual rendered output flowing into Foxglove, and a full Linux desktop (fluxbox window manager + the Gazebo GUI, auto-maximized) viewable in a browser tab via noVNC. The container must be built for `linux/amd64` (already set in `docker-compose.yml`) — Gazebo's apt dependency chain is broken on arm64.
+
+> See [docs/GAZEBO_SIMULATION.md](docs/GAZEBO_SIMULATION.md) for the architecture diagram, launch sequencing logic, and the reasoning behind each choice below.
+
+```bash
+# 1. Build and start the container (first time, or after editing the Dockerfile)
+docker compose build
+docker compose up -d
+
+# 2. Build the workspace packages (first time, or after editing URDF/world/launch files)
+docker exec ros2_dev bash -c "
+  source /opt/ros/humble/setup.bash &&
+  cd /ros2_ws &&
+  colcon build --symlink-install --packages-select xarm_description xarm_gripper orbbec_description"
+
+# 3. Launch everything — Xvfb, gzserver, robot_state_publisher, joint_state_pub,
+#    spawn the robot, foxglove_bridge, and the noVNC stack (x11vnc + websockify + gzclient)
+docker exec -it ros2_dev bash -c "
+  source /opt/ros/humble/setup.bash &&
+  source /ros2_ws/install/setup.bash &&
+  ros2 launch xarm_description gazebo_camera_test.launch.py"
+```
+
+That's it — one launch command brings up the full simulation. Ctrl+C stops everything cleanly.
+
+### Viewing the results
+
+- **Foxglove Studio** → Open Connection → `ws://localhost:8765`
+  - **Image panel** → `/camera/color/image_raw` — the real Gazebo-rendered camera feed
+  - **3D panel** → robot model + `/camera/depth/points`
+- **Browser (noVNC)** → `http://localhost:6080/vnc.html?resize=scale` → Connect (no password) — a full desktop (fluxbox) with the Gazebo GUI already maximized
+  - The `?resize=scale` stretches the view to fill your browser window client-side (free — no extra server-side rendering cost). You can also toggle this manually via the gear/Settings icon in the noVNC sidebar → **Scaling Mode** → **Local Scaling**.
+  - If you see `noVNC encountered an error: ... does not provide an export named 'init_logging'`, it's a stale browser cache, not a server problem — hard refresh (Cmd+Shift+R) or open in a private window.
+  - Performance is genuinely limited by software rendering under amd64 emulation (no GPU passthrough) — expect roughly 4–5 FPS / ~0.5 real-time factor in the Gazebo GUI itself. The headless camera feed into Foxglove is unaffected by GUI performance.
+
+### Why the robot doesn't move
+
+The URDF currently has `<gazebo><static>true</static></gazebo>` set. Without a joint controller (`libgazebo_ros_control.so` was removed early on), an unconstrained 6-DOF arm free-falls and oscillates under gravity once collision meshes load correctly — `static` freezes physics so the camera shows a clean, stable scene. Swap this for a real `ros2_control` controller when wiring in actual joint actuation.
+
+### Camera topics published
+
+| Topic | Content |
+|---|---|
+| `/camera/color/image_raw` | RGB image, 640×480 |
+| `/camera/color/camera_info` | Color camera intrinsics |
+| `/camera/depth/image_raw` | Depth image |
+| `/camera/depth/camera_info` | Depth camera intrinsics |
+| `/camera/depth/points` | XYZRGB point cloud |
+
+---
+
 ## macOS CLI (Optional)
 
 Inspect topics from macOS using the Zenoh bridge:
@@ -246,6 +302,13 @@ docker compose down
 | `ros2 topic list` hangs 60 s | `--no-daemon` injected by wrapper |
 | URDF links appear disconnected in Foxglove | Set **Scene → Mesh "up" axis → Y-up** in the 3D panel |
 | CycloneDDS interface mismatch on macOS | `CYCLONEDDS_URI` config; `ROS_LOCALHOST_ONLY=1` on bridge |
+| Gazebo Classic apt deps broken on arm64 (`libignition-sensors6` version mismatch) | Build container as `linux/amd64` (emulated) |
+| Robot meshes (visual + collision) fail to load in Gazebo (`Failed to find mesh file [model://...]`) | Add `<gazebo_ros gazebo_model_path="${prefix}/.."/>` export to each mesh-owning package's `package.xml`, and export `GAZEBO_MODEL_PATH`/`GAZEBO_RESOURCE_PATH` before starting `gzserver` |
+| `gazebo_ros_camera.so` ignores `cameraName`/`imageTopicName` tags (ROS1-style) | Use `<ros><remapping>...</remapping></ros>` + `camera_name`/`frame_name` (ROS2-style) instead |
+| Spawned robot flails/falls under gravity | No `ros2_control` controller is loaded; either add one, or set `<gazebo><static>true</static></gazebo>` to freeze physics |
+| `spawn_entity.py` shows stale robot after editing the URDF | `robot_state_publisher` reads the file once at startup — restart it after `colcon build` before respawning |
+| noVNC: `does not provide an export named 'init_logging'` | Stale browser cache — hard refresh or use a private window |
+| `gzclient` hangs forever on **OrbStack** (stuck right after `GuiIface.cc` warnings, 0% CPU, no window ever appears) | Not fixable from this repo — incompatibility between OrbStack's amd64 emulation and Mesa's software OpenGL renderer, specific to the GUI's real-time render loop. Confirmed reproducible. Disabling OrbStack's Rosetta setting (`orbctl config set rosetta false`) makes it worse — `gzserver` itself then crashes (`LLVM ERROR: 64-bit code requested on a subtarget that doesn't support it!`). Keep `rosetta: true`. The headless camera pipeline (gzserver → Foxglove) is unaffected either way and fully works on OrbStack. If you need the interactive GUI, use Docker Desktop instead — it works there. |
 
 ---
 

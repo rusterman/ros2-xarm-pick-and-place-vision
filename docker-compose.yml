@@ -1,5 +1,6 @@
 services:
   ros2:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile
@@ -9,6 +10,8 @@ services:
       - "7447:7447"
       # Foxglove bridge WebSocket — Foxglove Studio connects here for visualization
       - "8765:8765"
+      # noVNC — open http://localhost:6080/vnc.html to view gzclient's GUI in a browser
+      - "6080:6080"
     volumes:
       - ./src:/ros2_ws/src
       - ./config:/ros2_ws/config

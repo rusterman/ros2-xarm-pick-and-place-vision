@@ -12,6 +12,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/urdf', glob('urdf/*.urdf')),
         ('share/' + package_name + '/launch', glob('launch/*.py')),
+        ('share/' + package_name + '/worlds', glob('worlds/*.world')),
         ('share/' + package_name + '/meshes/xarm6/visual', glob('meshes/xarm6/visual/*')),
         ('share/' + package_name + '/meshes/xarm6/collision', glob('meshes/xarm6/collision/*')),
     ],
