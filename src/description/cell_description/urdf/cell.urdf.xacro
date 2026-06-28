@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="estica_cell">
+
+  <!-- xArm6 + gripper — defines its own "world" link and fixes link_base to
+       it at the origin, so the arm sits at the center of the cell. -->
+  <xacro:include filename="$(find xarm_description)/urdf/xarm6_with_gripper.urdf.xacro"/>
+
+  <!-- Orbbec Astra 2 — geometry/sensor block owned by orbbec_description;
+       this file only supplies where it's mounted in the cell. -->
+  <xacro:include filename="$(find orbbec_description)/urdf/astra_2.urdf.xacro"/>
+
+  <!-- Mounted 0.90 m upstream of the arm on the conveyor's line of travel
+       (belt moves toward +X, so upstream is -X; Y=0 keeps it on the same
+       line as the arm base — no sideways offset). Top-down: lens (camera
+       frame's local X axis) points straight at world -Z, camera body's
+       "top" aligned with +X (the belt direction). This is the standard
+       conveyor-vision mount — overhead/upstream, looking straight down —
+       so detection happens before the object enters the pick zone, with
+       no oblique distortion and no risk of the arm occluding the view.
+       Height (0.80 m) is a placeholder until conveyor_description defines
+       real belt height/clearance.
+
+       Clearance note: joint1 has no rotational limit (+-2*pi), and this
+       offset sits directly on the arm's reach axis (-X). Max horizontal
+       reach to the fingertip is ~0.86 m (see ARCHITECTURE.md reach calc)
+       vs this 0.90 m offset — only ~40 mm of margin if the arm ever
+       extends fully toward -X. Revisit once real pick-zone geometry from
+       conveyor_description exists. -->
+  <joint name="camera_mount_joint" type="fixed">
+    <parent link="world"/>
+    <child link="camera_link"/>
+    <origin xyz="0 -0.90 0.80" rpy="0 1.5708 0"/>
+  </joint>
+
+</robot>

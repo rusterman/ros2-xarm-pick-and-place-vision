@@ -92,7 +92,7 @@ docker compose up -d      # starts the container
 docker exec ros2_dev bash -c "
   source /opt/ros/humble/setup.bash &&
   cd /ros2_ws &&
-  colcon build --symlink-install --packages-select xarm_description xarm_gripper orbbec_description"
+  colcon build --symlink-install --packages-select xarm_description xarm_gripper orbbec_description cell_bringup"
 ```
 
 `--symlink-install` matters for iteration speed: Python source files are symlinked into the install space, so editing existing node logic needs **no rebuild at all** — just stop and re-run. A rebuild is only needed when adding a brand-new file, a new `console_scripts` entry, or a new `package.xml` dependency.
@@ -105,10 +105,10 @@ docker exec ros2_dev bash -c "
 docker exec -it ros2_dev bash -c "
   source /opt/ros/humble/setup.bash &&
   source /ros2_ws/install/setup.bash &&
-  ros2 launch xarm_description gazebo_camera_test.launch.py"
+  ros2 launch cell_bringup gazebo_camera_test.launch.py"
 ```
 
-One command brings up the entire stack. Internally, [`gazebo_camera_test.launch.py`](../src/xarm_description/launch/gazebo_camera_test.launch.py) sequences things like this:
+One command brings up the entire stack. `xarm_description`, `xarm_gripper`, and `orbbec_description` hold *only* URDF/meshes — no scripts, no launch files. Everything else (launch files, worlds, bringup nodes) lives in `cell_bringup`. Internally, [`gazebo_camera_test.launch.py`](../src/cell_bringup/launch/gazebo_camera_test.launch.py) sequences things like this:
 
 ```
 t=0s   SetEnvironmentVariable: DISPLAY, LIBGL_ALWAYS_SOFTWARE,

@@ -59,31 +59,25 @@ Cheese placed into correct grid slot
 ### System Overview
 
 ```
-macOS (Apple Silicon)
-├── Foxglove Studio           ← connects via WebSocket ws://localhost:8765
-├── ros2 CLI                  ← topic inspection, node management
-├── zenoh-bridge (client)     ← bridges DDS over TCP
-│       │
-│       └── TCP localhost:7447
-│
-Docker container: ros2_dev    (linux/arm64)
-├── foxglove_bridge           ← WebSocket server :8765
-├── zenoh-bridge (router)     ← port 7447
-├── robot_state_publisher     ← publishes TF from xArm6 URDF
-├── arm_demo                  ← animated joint state publisher (demo)
-└── /ros2_ws/src/
+[ Apple Silicon Mac Host ]
+       │
+       ├──► Browser (localhost:6080) ──► [ noVNC / fluxbox Desktop ] ──► Gazebo GUI (gzclient, CPU-rendered)
+       │
+       └──► Foxglove Studio ◄── [ WebSocket :8765 (foxglove_bridge) ] ◄── ROS2 Topics (/camera/color/image_raw, /tf)
+                                                                              ▲
+ ─────────────────────────────────────────────────────────────────────────────┼──────────────────────
+[ OrbStack Container (Linux amd64, emulated) ]                                │
+                                                                              │
+  [ gzserver (Gazebo Classic) ] ──(built-in gazebo_ros plugins)───────────────┘
+        │
+        └─► (Renders Orbbec Astra camera viewpoint frame-by-frame, headless via Xvfb + Mesa)
 ```
 
-### Current Node Graph
+Full breakdown of this diagram, the launch sequencing, and why each piece exists: [docs/GAZEBO_SIMULATION.md](docs/GAZEBO_SIMULATION.md).
 
-```
-arm_demo ──/joint_states──► robot_state_publisher ──/tf──► Foxglove 3D panel
-foxglove_bridge ──ws:8765──► Foxglove Studio
-```
+### Why Zenoh, separately, for the macOS CLI
 
-### Why Docker + Zenoh on macOS
-
-Docker Desktop on macOS runs containers inside a Linux VM. The container's bridge IP is unreachable from the host, so raw DDS does not work across the boundary. Zenoh bridges ROS2 topics over TCP — which Docker port-forwarding supports cleanly. Foxglove connects via WebSocket — no X11 or display server required.
+Docker/OrbStack runs containers inside a Linux VM. The container's bridge IP is unreachable from the host, so raw DDS does not work across that boundary. Zenoh bridges ROS2 topics over TCP — which Docker port-forwarding supports cleanly — purely so `ros2` CLI commands can run natively from macOS. It's unrelated to the Foxglove/noVNC paths above, which use a WebSocket and a VNC connection respectively.
 
 ---
 
@@ -91,29 +85,37 @@ Docker Desktop on macOS runs containers inside a Linux VM. The container's bridg
 
 ```
 .
-├── Dockerfile                  # ros:humble + colcon + zenoh-bridge + robot-state-publisher
-├── docker-compose.yml          # ports 7447 (zenoh) and 8765 (foxglove)
+├── Dockerfile                  # ros:humble + Gazebo Classic 11 + noVNC stack + zenoh-bridge
+├── docker-compose.yml          # ports 7447 (zenoh), 8765 (foxglove), 6080 (noVNC)
 ├── src/
-│   ├── xarm_description/       # xArm6 URDF, meshes, launch, demo nodes
+│   ├── xarm_description/       # xArm6 URDF + meshes ONLY — pure object description, no scripts/launch
 │   │   ├── urdf/
 │   │   │   └── xarm6_with_gripper.urdf
 │   │   ├── meshes/xarm6/
-│   │   │   ├── visual/         # STL files for Foxglove rendering
-│   │   │   └── collision/      # OBJ files for collision detection
-│   │   ├── launch/
-│   │   │   └── display.launch.py
-│   │   ├── xarm_description/
-│   │   │   ├── arm_demo.py     # animated demo — rotates arm, opens/closes gripper
-│   │   │   └── joint_state_pub.py  # static hold-up pose publisher
+│   │   │   ├── visual/         # STL files
+│   │   │   └── collision/      # OBJ files (convex decompositions)
 │   │   ├── package.xml
 │   │   └── setup.py
-│   ├── xarm_gripper/           # xArm gripper STL meshes
-│   │   ├── meshes/             # fingers, knuckles
+│   ├── xarm_gripper/           # xArm gripper meshes ONLY
+│   │   ├── meshes/
 │   │   ├── package.xml
 │   │   └── setup.py
-│   ├── hello_ros2/             # Python scaffold (publisher, subscriber, marker)
-│   └── hello_cpp/              # C++ scaffold (publisher, subscriber)
-├── xarm/                       # Original URDF files from UFACTORY (reference, not used in build)
+│   ├── orbbec_description/     # Orbbec Astra camera URDF + meshes ONLY
+│   │   ├── urdf/astra_2.urdf.xacro
+│   │   ├── meshes/astra2/
+│   │   ├── package.xml
+│   │   └── CMakeLists.txt
+│   └── cell_bringup/           # Everything that ISN'T pure description: launch files,
+│       │                       # worlds, and bringup nodes for the simulated cell
+│       ├── launch/
+│       │   └── gazebo_camera_test.launch.py   # the one command that brings up everything
+│       ├── worlds/
+│       │   └── camera_test.world
+│       ├── cell_bringup/
+│       │   └── joint_state_pub.py             # static hold pose (no controller wired in yet)
+│       ├── package.xml
+│       └── setup.py
+├── xarm-source/                 # Vendor-original UFACTORY xArm6 source (reference only)
 ├── config/
 │   └── cyclonedds_macos.xml    # CycloneDDS loopback config
 ├── bin/                        # gitignored — populated by download_zenoh.sh
@@ -125,6 +127,7 @@ Docker Desktop on macOS runs containers inside a Linux VM. The container's bridg
 └── docs/
     ├── ARCHITECTURE.md         # full system architecture document
     ├── GAZEBO_SIMULATION.md    # Gazebo install/launch logic, diagrams, and why each choice was made
+    ├── urdf-meshes-and-gazebo-sensors.md  # what meshes/URDF tags/Gazebo sensor tags are and do
     └── ...
 ```
 
@@ -155,66 +158,6 @@ docker compose up -d
 
 ---
 
-## Visualizing the xArm6 in Foxglove (Animated Demo)
-
-Launch order matters — start each in a separate terminal and keep them running.
-
-```bash
-# Terminal 1 — build xarm packages (first time or after code changes)
-docker exec ros2_dev bash -c "
-  source /opt/ros/humble/setup.bash &&
-  cd /ros2_ws &&
-  colcon build --packages-select xarm_description xarm_gripper"
-
-# Terminal 2 — robot state publisher (computes TF from joint states + URDF)
-docker exec -it ros2_dev bash -c "
-  source /opt/ros/humble/setup.bash &&
-  source /ros2_ws/install/setup.bash &&
-  ros2 launch xarm_description display.launch.py"
-
-# Terminal 3 — foxglove bridge (WebSocket server for Foxglove Studio)
-docker exec -it ros2_dev bash -c "
-  source /opt/ros/humble/setup.bash &&
-  source /ros2_ws/install/setup.bash &&
-  ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765"
-
-# Terminal 4 — arm demo (animated joint states: arm rotation + gripper open/close)
-docker exec -it ros2_dev bash -c "
-  source /opt/ros/humble/setup.bash &&
-  source /ros2_ws/install/setup.bash &&
-  ros2 run xarm_description arm_demo"
-```
-
-### Foxglove Studio Setup
-
-1. Open Foxglove Studio
-2. **Open Connection** → **Foxglove WebSocket** → `ws://localhost:8765` → **Open**
-3. Set **Display frame** → `world`
-4. **Custom layers** → **+** → **URDF**
-   - URL: `package://xarm_description/urdf/xarm6_with_gripper.urdf`
-   - Control mode: `Transforms`
-5. **Scene** → **Mesh "up" axis** → `Y-up`
-
-The xArm6 with gripper will appear and animate — rotating through 0° / 90° / 180° / -90° while opening and closing the gripper.
-
-> **Note:** The Mesh "up" axis must be set to **Y-up** for the UFACTORY STL meshes to render correctly. Z-up causes the links to appear disconnected.
-
----
-
-## Static Pose (No Animation)
-
-To display the arm in a fixed hold-up pose without animation:
-
-```bash
-# Replace Terminal 4 with:
-docker exec -it ros2_dev bash -c "
-  source /opt/ros/humble/setup.bash &&
-  source /ros2_ws/install/setup.bash &&
-  ros2 run xarm_description joint_state_pub"
-```
-
----
-
 ## Gazebo Classic Simulation (Real Rendered Camera + Browser GUI)
 
 Runs the xArm6 + Orbbec camera inside a real physics/rendering simulation (Gazebo Classic 11), with the camera's actual rendered output flowing into Foxglove, and a full Linux desktop (fluxbox window manager + the Gazebo GUI, auto-maximized) viewable in a browser tab via noVNC. The container must be built for `linux/amd64` (already set in `docker-compose.yml`) — Gazebo's apt dependency chain is broken on arm64.
@@ -230,15 +173,17 @@ docker compose up -d
 docker exec ros2_dev bash -c "
   source /opt/ros/humble/setup.bash &&
   cd /ros2_ws &&
-  colcon build --symlink-install --packages-select xarm_description xarm_gripper orbbec_description"
+  colcon build --symlink-install --packages-select xarm_description xarm_gripper orbbec_description cell_bringup"
 
 # 3. Launch everything — Xvfb, gzserver, robot_state_publisher, joint_state_pub,
 #    spawn the robot, foxglove_bridge, and the noVNC stack (x11vnc + websockify + gzclient)
 docker exec -it ros2_dev bash -c "
   source /opt/ros/humble/setup.bash &&
   source /ros2_ws/install/setup.bash &&
-  ros2 launch xarm_description gazebo_camera_test.launch.py"
+  ros2 launch cell_bringup gazebo_camera_test.launch.py"
 ```
+
+> `xarm_description`, `xarm_gripper`, and `orbbec_description` hold *only* URDF/meshes — no scripts, no launch files. Everything that brings the simulation up (launch files, worlds, the `joint_state_pub` node) lives in `cell_bringup`.
 
 That's it — one launch command brings up the full simulation. Ctrl+C stops everything cleanly.
 

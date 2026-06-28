@@ -663,13 +663,16 @@ Local Mac (dev)
 
 ### Foxglove Simulation
 
-Before real hardware is available the entire system is validated in simulation. Three lightweight mock publisher nodes replace the physical hardware interfaces. The higher-level planning and scheduling logic runs unchanged — only the hardware interfaces are replaced by simulation publishers.
+Before real hardware is available the entire system is validated in a physics-based Gazebo simulation, not a mock-data layer. The higher-level planning, scheduling, and **vision** logic all run completely unchanged against simulated sensor data — only the physical hardware interfaces are replaced.
 
-| Mock Node | Replaces | What it publishes |
+Critically, the camera path is **not** mocked: Gazebo's simulated Orbbec sensor plugin renders real RGB-D frames of the actual simulated scene (real spawned cheese geometry, real conveyor/container models) and publishes them as standard `sensor_msgs/Image` + `PointCloud2` — the exact same message types and topics the real Orbbec driver produces. The Vision Processing node (§5.2) consumes this identically in sim and on real hardware; it never knows the difference. There is no `camera_sim` node — fabricating a fake `/detected_objects` message would skip testing the one component most likely to fail in production.
+
+| Simulation Component | Replaces | How |
 |---|---|---|
-| `conveyor_sim` | Real conveyor belt | Belt position, cheese detections at random 4–6 sec intervals |
-| `container_sim` | Real container conveyor | Container position, current grid state |
-| `camera_sim` | Orbbec Astra camera | Fake cheese poses at realistic positions with batch dimensions |
+| Gazebo Orbbec sensor plugin | Real Orbbec Astra camera | Renders real depth/RGB of the simulated scene; feeds the unmodified Vision Processing pipeline — no fake detections published |
+| Conveyor entity/actuator (mechanism TBD: scripted kinematic motion vs. `ros2_control` + `gazebo_ros2_control`) | Real conveyor belt drive | Real spawned cheese models physically move/are repositioned in Gazebo at belt speed — tracked by Vision + Conveyor State Estimator like real footage, not injected as topic data |
+| Container entity/actuator (mechanism TBD) | Real container indexer | Real spawned container model advances in Gazebo when commanded by Container Index Controller |
+| Cheese spawner node | N/A — simulation-only | Spawns cheese models with randomized size + pose at the belt's start; this has no real-world software equivalent, so it remains a simulation-only component regardless of which actuation tier is chosen above |
 
 **What is visible in Foxglove during simulation:**
 
