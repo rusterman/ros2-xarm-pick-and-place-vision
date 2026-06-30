@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="conveyor">
+
+    <!-- ================= Parametric dimensions =================
+         All placeholders until real belt hardware is chosen.
+         Travel axis = Y (see note in cell.urdf.xacro). Belt is centred
+         on its own base_link; cell_description places base_link in world.
+
+         Exposed as xacro args (not bare properties) so callers that need
+         this value elsewhere — e.g. estica_bringup/launch/cell_display.launch.py
+         computing cheese spawn_z off the belt top surface — can pass the
+         same number in instead of hardcoding a second copy that can drift
+         out of sync with this file. -->
+    <xacro:arg name="belt_length"    default="6.0"/>   <!-- along Y (travel) -->
+    <xacro:arg name="belt_width"     default="0.5"/>   <!-- along X -->
+    <xacro:arg name="belt_thickness" default="0.01"/>  <!-- top slab -->
+
+    <xacro:property name="belt_length"    value="$(arg belt_length)"/>
+    <xacro:property name="belt_width"     value="$(arg belt_width)"/>
+    <xacro:property name="belt_thickness" value="$(arg belt_thickness)"/>
+    <xacro:property name="belt_mass"      value="5.0"/>  <!-- placeholder until real belt hardware is chosen -->
+
+    <!-- Single static link. Its origin sits at the BELT TOP SURFACE, center;
+         the slab is drawn with negative Z so the surface stays the clean
+         reference plane that cell_description mounts (mount Z = real belt
+         height). Pure geometry only.
+
+         No prismatic joint and no belt-motion plugin live here: per
+         docs/PACKAGE_STRUCTURE.md §7 the conveyor has no ros2_control path and
+         its belt motion is a scripted Gazebo entity update owned by
+         estica_gazebo (simulation layer), not the description layer. -->
+    <link name="conveyor_base_link">
+        <visual>
+            <origin xyz="0 0 ${-belt_thickness/2}" rpy="0 0 0"/>
+            <geometry>
+                <box size="${belt_width} ${belt_length} ${belt_thickness}"/>
+            </geometry>
+            <material name="conveyor_belt_dark">
+                <color rgba="0.5 0.5 0.5 1.0"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 ${-belt_thickness/2}" rpy="0 0 0"/>
+            <geometry>
+                <box size="${belt_width} ${belt_length} ${belt_thickness}"/>
+            </geometry>
+        </collision>
+        <inertial>
+            <mass value="${belt_mass}"/>
+            <origin xyz="0 0 ${-belt_thickness/2}" rpy="0 0 0"/>
+            <!-- solid-box inertia about the center, same formula as
+                 cheese_description (width->X, length->Y, thickness->Z here).
+                 The conveyor is mounted via a fixed joint in cell_description
+                 so this never actually drives free-body dynamics today, but
+                 keeping it a real placeholder-but-derived value instead of a
+                 mismatched 1.0/1.0/1.0 matches docs/PACKAGE_STRUCTURE.md §9's
+                 physics-fidelity expectation and stops it being silently
+                 wrong if the conveyor is ever unfixed later. -->
+            <inertia
+                    ixx="${(belt_mass/12.0)*(belt_length*belt_length + belt_thickness*belt_thickness)}" ixy="0" ixz="0"
+                    iyy="${(belt_mass/12.0)*(belt_width*belt_width   + belt_thickness*belt_thickness)}" iyz="0"
+                    izz="${(belt_mass/12.0)*(belt_width*belt_width   + belt_length*belt_length)}"/>
+        </inertial>
+    </link>
+
+</robot>

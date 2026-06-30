@@ -9,10 +9,18 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>cell_description</exec_depend>
+  <exec_depend>cheese_description</exec_depend>
+  <exec_depend>conveyor_description</exec_depend>
+  <exec_depend>orbbec_description</exec_depend>
+  <exec_depend>xarm_description</exec_depend>
+  <exec_depend>xarm_gripper</exec_depend>
+  <exec_depend>estica_gazebo</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>joint_state_publisher</exec_depend>
   <exec_depend>xacro</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
   <exec_depend>foxglove_bridge</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>

@@ -9,16 +9,33 @@
        this file only supplies where it's mounted in the cell. -->
   <xacro:include filename="$(find orbbec_description)/urdf/astra_2.urdf.xacro"/>
 
+  <!-- Conveyor belt — geometry owned by conveyor_description; this file
+       only supplies where it sits in the cell. -->
+  <xacro:include filename="$(find conveyor_description)/urdf/conveyor.urdf.xacro"/>
+
+  <!-- Mount position as xacro args (not bare literals) so callers that need
+       this same number elsewhere — e.g. estica_bringup/launch/cell_display.launch.py
+       computing cheese spawn_z relative to the belt — can pass it in instead
+       of hardcoding a second copy that can drift out of sync with this file. -->
+  <xacro:arg name="conveyor_mount_x" default="0.40"/>
+  <xacro:arg name="conveyor_mount_y" default="-0.4"/>
+  <xacro:arg name="conveyor_mount_z" default="0.01"/>
+
   <!-- Mounted 0.90 m upstream of the arm on the conveyor's line of travel
-       (belt moves toward +X, so upstream is -X; Y=0 keeps it on the same
-       line as the arm base — no sideways offset). Top-down: lens (camera
+       (belt moves toward +Y, so upstream is -Y). Top-down: lens (camera
        frame's local X axis) points straight at world -Z, camera body's
-       "top" aligned with +X (the belt direction). This is the standard
+       "top" aligned with +Y (the belt direction). This is the standard
        conveyor-vision mount — overhead/upstream, looking straight down —
        so detection happens before the object enters the pick zone, with
        no oblique distortion and no risk of the arm occluding the view.
        Height (0.80 m) is a placeholder until conveyor_description defines
        real belt height/clearance.
+
+       x reuses $(arg conveyor_mount_x) rather than its own literal: the
+       camera is deliberately centered on the conveyor's line of travel by
+       design, not by coincidence, so the two must move together. A bare
+       second copy of "0.40" here would silently fall out of alignment with
+       the belt if conveyor_mount_x is ever overridden.
 
        Clearance note: joint1 has no rotational limit (+-2*pi), and this
        offset sits directly on the arm's reach axis (-X). Max horizontal
@@ -29,7 +46,13 @@
   <joint name="camera_mount_joint" type="fixed">
     <parent link="world"/>
     <child link="camera_link"/>
-    <origin xyz="0 -0.90 0.80" rpy="0 1.5708 0"/>
+    <origin xyz="$(arg conveyor_mount_x) -0.90 0.80" rpy="0 1.5708 0"/>
+  </joint>
+
+  <joint name="conveyor_mount_joint" type="fixed">
+    <parent link="world"/>
+    <child  link="conveyor_base_link"/>
+    <origin xyz="$(arg conveyor_mount_x) $(arg conveyor_mount_y) $(arg conveyor_mount_z)" rpy="0 0 0"/>
   </joint>
 
 </robot>

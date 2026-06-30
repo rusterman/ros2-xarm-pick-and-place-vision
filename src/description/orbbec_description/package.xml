@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>orbbec_description</name>
-  <version>2.8.7</version>
+  <version>1.0.0</version>
   <description>URDF/xacro and meshes for the Orbbec Astra 2 camera</description>
   <maintainer email="rustam.atakisiev@gmail.com">rustam</maintainer>
   <license>Apache-2.0</license>

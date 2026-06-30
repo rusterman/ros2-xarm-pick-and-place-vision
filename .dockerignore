@@ -50,7 +50,8 @@ CMakeFiles/
 
 # ── Docs and scripts (not needed inside container) ────────────
 docs/
-scripts/
+scripts/*
+!scripts/entrypoint.sh
 README.md
 
 # ── Temporary xarm reference files ───────────────────────────

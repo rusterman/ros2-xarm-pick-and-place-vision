@@ -1,15 +1,14 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-    <name>conveyor_description</name>
+    <name>cheese_description</name>
     <version>1.0.0</version>
-    <description>URDF/xacro for the conveyor belt in the cheese pick-and-place cell</description>
+    <description>URDF/xacro for the cheese slice spawned onto the conveyor in the pick-and-place cell</description>
     <maintainer email="rustam.atakisiev@gmail.com">rustam</maintainer>
     <license>Apache-2.0</license>
 
     <buildtool_depend>ament_cmake</buildtool_depend>
 
-    <exec_depend>robot_state_publisher</exec_depend>
     <exec_depend>xacro</exec_depend>
 
     <test_depend>ament_lint_auto</test_depend>

@@ -39,6 +39,10 @@ RUN curl -sL "https://github.com/eclipse-zenoh/zenoh-plugin-ros2dds/releases/dow
 
 WORKDIR /ros2_ws
 
+COPY scripts/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc && \
     echo "[ -f /ros2_ws/install/setup.bash ] && source /ros2_ws/install/setup.bash" >> /root/.bashrc
 

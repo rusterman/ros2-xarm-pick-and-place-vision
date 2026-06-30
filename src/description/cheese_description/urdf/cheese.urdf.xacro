@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="cheese">
+
+    <!-- Cheese slice: a FREE rigid body that rides the belt (no joint to world).
+         Dimensions from ARCHITECTURE.md §5.1 batch recipe. Size is a batch
+         parameter (args); the spawner randomizes pose, not size. Orientation at
+         yaw=0: length→X, width→Y, height→Z (lies flat, 20 mm vertical). -->
+
+    <xacro:arg name="length"  default="0.100"/>  <!-- long axis  (X) -->
+    <xacro:arg name="width"   default="0.050"/>  <!-- short axis (Y) -->
+    <xacro:arg name="height"  default="0.020"/>  <!-- thickness  (Z) -->
+    <xacro:arg name="color_r" default="0.95"/>
+    <xacro:arg name="color_g" default="0.80"/>
+    <xacro:arg name="color_b" default="0.20"/>
+    <xacro:arg name="color_a" default="1.0"/>
+
+    <xacro:property name="length"  value="$(arg length)"/>
+    <xacro:property name="width"   value="$(arg width)"/>
+    <xacro:property name="height"  value="$(arg height)"/>
+    <xacro:property name="color_r" value="$(arg color_r)"/>
+    <xacro:property name="color_g" value="$(arg color_g)"/>
+    <xacro:property name="color_b" value="$(arg color_b)"/>
+    <xacro:property name="color_a" value="$(arg color_a)"/>
+    <xacro:property name="density" value="1090"/>                         <!-- kg/m^3, ~cheddar -->
+    <xacro:property name="mass"    value="${density * length * width * height}"/>
+
+    <link name="cheese_link">
+        <visual>
+            <geometry><box size="${length} ${width} ${height}"/></geometry>
+            <material name="cheese_yellow"><color rgba="${color_r} ${color_g} ${color_b} ${color_a}"/></material>
+        </visual>
+        <collision>
+            <geometry><box size="${length} ${width} ${height}"/></geometry>
+        </collision>
+        <inertial>
+            <mass value="${mass}"/>
+            <!-- solid-box inertia about the center -->
+            <inertia
+                    ixx="${(mass/12.0)*(width*width  + height*height)}" ixy="0" ixz="0"
+                    iyy="${(mass/12.0)*(length*length + height*height)}" iyz="0"
+                    izz="${(mass/12.0)*(length*length + width*width)}"/>
+        </inertial>
+    </link>
+
+    <!-- Gazebo-only: friction (drag from the belt) + render color for the
+         simulated Orbbec RGB. mu1/mu2 are the main values to TUNE against the
+         belt's friction — carried by the belt, still releasable by the gripper. -->
+    <gazebo reference="cheese_link">
+        <mu1>1.0</mu1>
+        <mu2>1.0</mu2>
+        <material>Gazebo/Yellow</material>
+    </gazebo>
+
+</robot>
