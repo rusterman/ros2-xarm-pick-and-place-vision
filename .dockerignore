@@ -56,3 +56,4 @@ README.md
 
 # ── Temporary xarm reference files ───────────────────────────
 xarm/
+cmake-build-debug/

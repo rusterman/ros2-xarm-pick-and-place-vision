@@ -39,3 +39,4 @@ bin/zenoh-bridge-ros2dds
 
 # ── Claude Code internal ──────────────────────────────────────
 .claude/
+cmake-build-debug/

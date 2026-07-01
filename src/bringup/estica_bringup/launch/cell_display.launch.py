@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler, TimerAction
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessStart
 from launch.substitutions import (
@@ -45,7 +45,7 @@ def generate_launch_description():
     # the one package allowed to position things), so these stay
     # Python-authoritative here and get pushed down as xacro args.
     conveyor_mount_x = 0.40
-    conveyor_mount_y = -0.8
+    conveyor_mount_y = -0.4
     conveyor_mount_z = 0.01
 
     # belt_thickness and the cheese batch geometry/color, by contrast, are
@@ -139,6 +139,20 @@ def generate_launch_description():
     )
 
     # --- Gazebo-only actions, gated on use_gazebo:=true ---
+    # Gazebo's OGRE renderer needs a real X11/OpenGL context even for
+    # headless offscreen rendering (the Orbbec camera sensor) — there's no
+    # true "no X server" mode. Without Xvfb, gzserver logs "Can't open
+    # display" + "Unable to create DepthCameraSensor. Rendering is
+    # disabled", and the robot's spawn (it includes that camera) times out
+    # and spawn_entity.py exits with an error — the entity never actually
+    # appears in the world. LIBGL_ALWAYS_SOFTWARE forces Mesa's software
+    # rasterizer since there's no GPU passthrough in Docker.
+    xvfb = ExecuteProcess(
+        cmd=["Xvfb", ":1", "-screen", "0", "1024x768x24"],
+        output="screen",
+        condition=IfCondition(use_gazebo),
+    )
+
     gzserver = ExecuteProcess(
         cmd=[
             "gzserver",
@@ -149,7 +163,11 @@ def generate_launch_description():
             "libgazebo_ros_factory.so",
             world,
         ],
-        additional_env={"GAZEBO_MODEL_PATH": gazebo_model_path},
+        additional_env={
+            "GAZEBO_MODEL_PATH": gazebo_model_path,
+            "DISPLAY": ":1",
+            "LIBGL_ALWAYS_SOFTWARE": "1",
+        },
         output="screen",
         condition=IfCondition(use_gazebo),
     )
@@ -201,7 +219,12 @@ def generate_launch_description():
         robot_state_publisher,
         joint_state_publisher,
         foxglove_bridge,
-        gzserver,
+        xvfb,
+        # 3 s is an empirically-tuned delay (matching the previous, removed
+        # cell_bringup pipeline documented in docs/GAZEBO_SIMULATION.md), not
+        # a real readiness check — Xvfb has no ROS service/topic to wait on.
+        # May need adjusting if the host is under heavy load.
+        TimerAction(period=3.0, actions=[gzserver], condition=IfCondition(use_gazebo)),
         RegisterEventHandler(
             OnProcessStart(
                 target_action=gzserver,

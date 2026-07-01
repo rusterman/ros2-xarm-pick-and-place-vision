@@ -16,15 +16,22 @@
 using namespace std::chrono_literals;
 
 // One cheese currently riding the belt. id/name are fixed at spawn time.
-// x/y are the scripted belt-tracked position, advanced every tick. z/yaw
-// are only the *initial* spawn pose — once a live GetEntityState reply has
-// come back for this entity, CheeseSpawner::setPose uses Gazebo's own
-// physics-computed z/orientation instead, so gravity/tipping/contact are
-// still observable rather than being silently overwritten every tick.
+// x/y are the scripted belt-tracked position, advanced every tick. z and
+// the orientation quaternion start as the flat spawn pose, but
+// CheeseSpawner::setPose overwrites both with Gazebo's own physics-computed
+// values as soon as a GetEntityState reply comes back — and keeps them
+// here in active_, not just in the outgoing SetEntityState request, so
+// CheeseMarkerPublisher (which reads straight from active_) shows the same
+// gravity/tipping/stacking the camera actually renders instead of every
+// cheese frozen at its spawn-time flat pose. A full quaternion (not a yaw
+// scalar) is needed because a cheese that's physically tipped — e.g.
+// resting on top of another one — can pick up real roll/pitch, which a
+// yaw-only value can't represent.
 struct Cheese {
     int id;
     std::string name;
-    double x, y, z, yaw;
+    double x, y, z;
+    double qx{0.0}, qy{0.0}, qz{0.0}, qw{1.0};
 };
 
 // Owns nothing but the Foxglove debug publisher. Kept separate from
@@ -38,7 +45,8 @@ public:
     void publish(
         const rclcpp::Time &stamp, const std::vector<Cheese> &active,
         double length, double width, double height,
-        double r, double g, double b, double a) {
+        double r, double g, double b, double a
+        ) {
         visualization_msgs::msg::MarkerArray arr;
 
         visualization_msgs::msg::Marker clear;
@@ -59,8 +67,10 @@ public:
             m.pose.position.x = c.x;
             m.pose.position.y = c.y;
             m.pose.position.z = c.z;
-            m.pose.orientation.z = std::sin(c.yaw / 2.0);
-            m.pose.orientation.w = std::cos(c.yaw / 2.0);
+            m.pose.orientation.x = c.qx;
+            m.pose.orientation.y = c.qy;
+            m.pose.orientation.z = c.qz;
+            m.pose.orientation.w = c.qw;
             m.scale.x = length;
             m.scale.y = width;
             m.scale.z = height;
@@ -149,7 +159,7 @@ private:
                     survivors.push_back(c);
                 }
             } else {
-                setPose(c);
+                setPose(c.name);
                 survivors.push_back(c);
             }
         }
@@ -160,13 +170,15 @@ private:
             cheese_color_r_, cheese_color_g_, cheese_color_b_, cheese_color_a_);
     }
 
-    geometry_msgs::msg::Pose poseFrom(double x, double y, double z, double yaw) {
+    geometry_msgs::msg::Pose poseFrom(double x, double y, double z, double qx, double qy, double qz, double qw) {
         geometry_msgs::msg::Pose p;
         p.position.x = x;
         p.position.y = y;
         p.position.z = z;
-        p.orientation.z = std::sin(yaw / 2.0); // yaw-only quaternion
-        p.orientation.w = std::cos(yaw / 2.0);
+        p.orientation.x = qx;
+        p.orientation.y = qy;
+        p.orientation.z = qz;
+        p.orientation.w = qw;
         return p;
     }
 
@@ -186,12 +198,14 @@ private:
         c.x = x_center_ + randRange(-x_jitter_, x_jitter_);
         c.y = spawn_y_;
         c.z = spawn_z_;
-        c.yaw = randRange(-M_PI_2, M_PI_2);
+        const double yaw = randRange(-M_PI_2, M_PI_2); // flat spawn: yaw-only
+        c.qz = std::sin(yaw / 2.0);
+        c.qw = std::cos(yaw / 2.0);
 
         auto req = std::make_shared<gazebo_msgs::srv::SpawnEntity::Request>();
         req->name = c.name;
         req->xml = cheese_urdf_;
-        req->initial_pose = poseFrom(c.x, c.y, c.z, c.yaw);
+        req->initial_pose = poseFrom(c.x, c.y, c.z, c.qx, c.qy, c.qz, c.qw);
         req->reference_frame = "world";
 
         spawn_cli_->async_send_request(
@@ -212,40 +226,59 @@ private:
     // from Gazebo via GetEntityState first and passed straight through to
     // SetEntityState unchanged — i.e. wherever physics actually settled the
     // cheese (gravity, tipping, contact with the belt) — instead of being
-    // forced from the cached spawn-time z/yaw on every single tick, which
+    // forced from the cached spawn-time z/orientation on every single tick, which
     // would silently fight the physics engine 50 times a second. Falls back
     // to the spawn pose only for the few ticks before the first reply for a
     // newly spawned entity arrives.
-    void setPose(const Cheese &c) {
+    //
+    // Only the name is captured (not a Cheese snapshot): Gazebo service
+    // round trips routinely take longer than the 20 ms tick period, so
+    // several ticks' worth of these requests can be in flight at once. A
+    // captured-by-value x/y would still reflect wherever the cheese was at
+    // *issue* time — whichever stale reply happened to resolve last would
+    // win and silently rubber-band the entity backward. Looking the current
+    // position up fresh from active_ at *resolution* time instead means
+    // every SetEntityState call carries the latest known position
+    // regardless of reply order.
+    void setPose(const std::string &name) {
         if (!get_cli_->service_is_ready() || !state_cli_->service_is_ready()) return;
 
         auto get_req = std::make_shared<gazebo_msgs::srv::GetEntityState::Request>();
-        get_req->name = c.name;
+        get_req->name = name;
         get_req->reference_frame = "world";
 
         get_cli_->async_send_request(
-            get_req, [this, c](rclcpp::Client<gazebo_msgs::srv::GetEntityState>::SharedFuture f) {
+            get_req, [this, name](rclcpp::Client<gazebo_msgs::srv::GetEntityState>::SharedFuture f) {
                 auto resp = f.get();
 
-                // This is a two-hop async round trip: by the time this reply
-                // arrives, a later tick may already have pushed this same
-                // cheese past despawn_y_ and had it deleted from Gazebo.
-                // Firing SetEntityState for a name Gazebo no longer has can
-                // crash gzserver outright (gazebo_ros_state dereferences the
-                // looked-up entity without a null check), so bail out if
-                // this cheese isn't tracked as active anymore instead of
-                // blindly sending the follow-up request.
-                if (!isActive(c.name)) return;
+                // Also covers the crash-safety check from before: if this
+                // cheese was deleted while the request was in flight,
+                // findActive returns null and we skip instead of firing
+                // SetEntityState for a name Gazebo no longer has.
+                Cheese *current = findActive(name);
+                if (!current) return;
 
-                geometry_msgs::msg::Pose pose = poseFrom(c.x, c.y, c.z, c.yaw);
                 if (resp->success) {
-                    pose.position.z = resp->state.pose.position.z;
-                    pose.orientation = resp->state.pose.orientation;
+                    // Written back into active_ itself, not just used for
+                    // the outgoing request below — CheeseMarkerPublisher
+                    // reads straight from active_, so without this every
+                    // cheese would stay rendered at its flat spawn height/
+                    // orientation even after physics has, say, stacked one
+                    // on top of another in the actual (camera-rendered)
+                    // scene, making the Foxglove 3D panel show them as
+                    // interpenetrating instead of stacked.
+                    current->z = resp->state.pose.position.z;
+                    current->qx = resp->state.pose.orientation.x;
+                    current->qy = resp->state.pose.orientation.y;
+                    current->qz = resp->state.pose.orientation.z;
+                    current->qw = resp->state.pose.orientation.w;
                 }
 
                 auto set_req = std::make_shared<gazebo_msgs::srv::SetEntityState::Request>();
-                set_req->state.name = c.name;
-                set_req->state.pose = pose;
+                set_req->state.name = name;
+                set_req->state.pose = poseFrom(
+                    current->x, current->y, current->z,
+                    current->qx, current->qy, current->qz, current->qw);
                 set_req->state.reference_frame = "world";
                 state_cli_->async_send_request(
                     set_req, [](rclcpp::Client<gazebo_msgs::srv::SetEntityState>::SharedFuture) {
@@ -253,11 +286,11 @@ private:
             });
     }
 
-    bool isActive(const std::string &name) const {
-        for (const auto &c : active_) {
-            if (c.name == name) return true;
+    Cheese *findActive(const std::string &name) {
+        for (auto &c : active_) {
+            if (c.name == name) return &c;
         }
-        return false;
+        return nullptr;
     }
 
     // Returns true once the delete has actually been submitted, so the
