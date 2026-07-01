@@ -227,6 +227,16 @@ private:
             get_req, [this, c](rclcpp::Client<gazebo_msgs::srv::GetEntityState>::SharedFuture f) {
                 auto resp = f.get();
 
+                // This is a two-hop async round trip: by the time this reply
+                // arrives, a later tick may already have pushed this same
+                // cheese past despawn_y_ and had it deleted from Gazebo.
+                // Firing SetEntityState for a name Gazebo no longer has can
+                // crash gzserver outright (gazebo_ros_state dereferences the
+                // looked-up entity without a null check), so bail out if
+                // this cheese isn't tracked as active anymore instead of
+                // blindly sending the follow-up request.
+                if (!isActive(c.name)) return;
+
                 geometry_msgs::msg::Pose pose = poseFrom(c.x, c.y, c.z, c.yaw);
                 if (resp->success) {
                     pose.position.z = resp->state.pose.position.z;
@@ -241,6 +251,13 @@ private:
                     set_req, [](rclcpp::Client<gazebo_msgs::srv::SetEntityState>::SharedFuture) {
                     });
             });
+    }
+
+    bool isActive(const std::string &name) const {
+        for (const auto &c : active_) {
+            if (c.name == name) return true;
+        }
+        return false;
     }
 
     // Returns true once the delete has actually been submitted, so the

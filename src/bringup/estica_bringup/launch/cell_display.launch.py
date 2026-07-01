@@ -45,7 +45,7 @@ def generate_launch_description():
     # the one package allowed to position things), so these stay
     # Python-authoritative here and get pushed down as xacro args.
     conveyor_mount_x = 0.40
-    conveyor_mount_y = -0.4
+    conveyor_mount_y = -0.8
     conveyor_mount_z = 0.01
 
     # belt_thickness and the cheese batch geometry/color, by contrast, are

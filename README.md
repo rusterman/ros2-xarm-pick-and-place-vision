@@ -2,7 +2,7 @@
 
 A ROS2 robotic system for **detecting, picking, and placing cheese slices into a moving grid container** using computer vision and motion planning. Built with a fully containerized architecture that runs on **macOS (Apple Silicon / M chips)** out of the box.
 
-> **Status:** Active development — infrastructure complete; the workspace has been reorganized into a layered, Clean-Architecture package structure (see [docs/PACKAGE_STRUCTURE.md](docs/PACKAGE_STRUCTURE.md)). The full cell — xArm6 + gripper, Orbbec Astra 2 camera, and a parametric conveyor belt — is composed by `cell_description` and visualized as a static scene in Foxglove via `estica_bringup`. The full Gazebo Classic camera-rendering pipeline is documented and was previously working; its launch package was removed during the reorg and is being re-integrated into the new layout. Perception and manipulation are next.
+> **Status:** Active development — infrastructure complete; the workspace follows a layered, Clean-Architecture package structure (see [docs/PACKAGE_STRUCTURE.md](docs/PACKAGE_STRUCTURE.md)). The full cell — xArm6 + gripper, Orbbec Astra 2 camera, and a conveyor belt — is composed by `cell_description` and can be brought up two ways from the same `estica_bringup` launch file: a static TF-only display in Foxglove, or a full Gazebo Classic physics simulation with real rendered camera output and cheese slices spawning and riding the belt (`estica_gazebo`). Perception and manipulation are next.
 
 ---
 
@@ -62,26 +62,27 @@ This is the target pipeline ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)). The 
 
 The repository follows a layered, Clean-Architecture package split — geometry, message contracts, decision logic, hardware, and bringup are kept in strictly separate packages so simulation and real hardware are swappable without touching the core logic. The full rationale (the Dependency Rule, the sim/real swap, why the conveyor is treated differently) is in **[docs/PACKAGE_STRUCTURE.md](docs/PACKAGE_STRUCTURE.md)**.
 
-Only the `description/` and `bringup/` layers are scaffolded so far; the `interfaces/`, `functional/`, `hardware/`, `simulation/`, and `operational/` layers are designed but not yet built.
+The `description/`, `bringup/`, and `simulation/` layers are scaffolded so far; the `interfaces/`, `functional/`, `hardware/`, and `operational/` layers are designed but not yet built.
 
-### System overview (full Gazebo pipeline — being re-integrated)
+### System overview (Gazebo pipeline, headless)
 
 ```
 [ Apple Silicon Mac Host ]
        │
-       ├──► Browser (localhost:6080) ──► [ noVNC / fluxbox Desktop ] ──► Gazebo GUI (gzclient, CPU-rendered)
-       │
-       └──► Foxglove Studio ◄── [ WebSocket :8765 (foxglove_bridge) ] ◄── ROS2 Topics (/tf, /camera/...)
+       └──► Foxglove Studio ◄── [ WebSocket :8765 (foxglove_bridge) ] ◄── ROS2 Topics (/tf, /camera/..., /cheese/markers)
                                                                               ▲
  ─────────────────────────────────────────────────────────────────────────────┼──────────────────────
 [ OrbStack / Docker Container (Linux amd64, emulated) ]                       │
                                                                               │
   [ gzserver (Gazebo Classic) ] ──(built-in gazebo_ros plugins)───────────────┘
         │
-        └─► (Renders Orbbec Astra camera viewpoint frame-by-frame, headless via Xvfb + Mesa)
+        ├─► Renders Orbbec Astra camera viewpoint frame-by-frame, headless via Xvfb + Mesa
+        └─► cheese_spawner node (estica_gazebo) — spawns cheese slices onto the belt on a
+            random interval and scripts their motion along +Y at constant speed, via the
+            /spawn_entity, /get_entity_state, /set_entity_state, /delete_entity services
 ```
 
-Full breakdown of this diagram, the launch sequencing, and why each piece exists: [docs/GAZEBO_SIMULATION.md](docs/GAZEBO_SIMULATION.md). **Note:** the launch package that drove this pipeline (`cell_bringup`) was removed during the workspace reorg; the diagram and reasoning still hold, but the launch files need re-creating under the new `bringup/` layout.
+Full breakdown of the launch sequencing and why each piece exists: [docs/GAZEBO_SIMULATION.md](docs/GAZEBO_SIMULATION.md) — note that doc still describes the *previous* `cell_bringup`-package version of this pipeline, which included an interactive noVNC/`gzclient` browser GUI. The current `estica_bringup`/`estica_gazebo` pipeline described here is a from-scratch rebuild under the new layered structure and is **headless only** — no noVNC GUI yet (see [Gazebo Classic Simulation](#gazebo-classic-simulation) below for what's actually implemented today).
 
 ### Why Zenoh, separately, for the macOS CLI
 
@@ -101,13 +102,17 @@ Docker/OrbStack runs containers inside a Linux VM. The container's bridge IP is 
 │   │   ├── xarm_gripper/                  # gripper meshes only
 │   │   ├── orbbec_description/            # Orbbec Astra 2 URDF (astra_2.urdf.xacro) + meshes
 │   │   ├── conveyor_description/          # parametric conveyor belt (conveyor.urdf.xacro)
+│   │   ├── cheese_description/            # parametric cheese slice (cheese.urdf.xacro)
 │   │   ├── container_description/         # (placeholder — not yet modeled)
-│   │   ├── cheese_description/            # (placeholder — not yet modeled)
 │   │   └── cell_description/              # composes all of the above into one scene
 │   │       └── urdf/cell.urdf.xacro       #   — the ONLY package that positions things
-│   └── bringup/
-│       └── estica_bringup/               # launch files only
-│           └── launch/cell_display.launch.py
+│   ├── bringup/
+│   │   └── estica_bringup/               # launch files only — the single entry point
+│   │       └── launch/cell_display.launch.py   # use_gazebo:=false (default) | true
+│   └── simulation/
+│       └── estica_gazebo/                # world file + cheese spawner node only
+│           ├── worlds/cell.world
+│           └── src/cheese_spawner.cpp    # spawns + scripts cheese motion on the belt
 ├── xarm-source/                # Vendor-original UFACTORY xArm6 source (reference only)
 ├── config/
 │   └── cyclonedds_macos.xml    # CycloneDDS loopback config
@@ -121,7 +126,9 @@ Docker/OrbStack runs containers inside a Linux VM. The container's bridge IP is 
     ├── ARCHITECTURE.md         # full system architecture (the target pipeline)
     ├── PACKAGE_STRUCTURE.md    # why the workspace is split this way (Clean Architecture)
     ├── DESIGN.md               # design notes
-    ├── GAZEBO_SIMULATION.md    # Gazebo install/launch logic + diagrams (pipeline being re-integrated)
+    ├── GAZEBO_SIMULATION.md    # Gazebo install/launch logic — describes the previous
+    │                           #   cell_bringup-package version of this pipeline (with
+    │                           #   noVNC GUI); superseded by estica_bringup/estica_gazebo
     └── ...
 ```
 
@@ -129,7 +136,11 @@ Every `description/` package is built with `ament_cmake` (a `CMakeLists.txt` tha
 
 ### The conveyor model
 
-`conveyor_description/urdf/conveyor.urdf.xacro` models the belt parametrically (length / width / thickness as xacro properties) as a thin box slab on a `conveyor_base_link` reference frame placed at the belt's top surface, so `cell_description` can mount it by belt-surface height directly. The belt slab is its own link joined by a **prismatic** `conveyor_belt_joint` (travel along **+Y**), ready for the [IFRA ConveyorBelt](https://github.com/IFRA-Cranfield/IFRA_ConveyorBelt) Gazebo plugin (Apache-2.0) — the `<gazebo>` plugin block is present but **dormant** until the Gazebo pipeline is re-integrated, since belt motion is a physics-sim effect and does not appear in the static Foxglove display.
+`conveyor_description/urdf/conveyor.urdf.xacro` models the belt as a static box slab on a `conveyor_base_link` reference frame placed at the belt's top surface, so `cell_description` can mount it by belt-surface height directly — the belt mesh itself never moves. Per [docs/PACKAGE_STRUCTURE.md §7](docs/PACKAGE_STRUCTURE.md), the conveyor has no `ros2_control` path and no prismatic joint: instead, `estica_gazebo`'s `cheese_spawner` node scripts each cheese slice's own motion along the belt directly (advances `x`/`y` every tick, reads `z`/orientation back from Gazebo's physics via `GetEntityState` so gravity/tipping/contact still apply), via the `/spawn_entity`, `/get_entity_state`, `/set_entity_state`, and `/delete_entity` services — not a conveyor-belt physics plugin.
+
+### The cheese model
+
+`cheese_description/urdf/cheese.urdf.xacro` models a cheese slice as a free rigid body (no joint to world) — a box sized by `length`/`width`/`height` xacro args, with mass derived from `density × volume` and a proper solid-box inertia tensor, so it behaves like a real object under Gazebo's physics rather than a placeholder. Size/color are batch parameters (per [ARCHITECTURE.md §5.1](docs/ARCHITECTURE.md)); `estica_bringup`'s launch file reads the xacro's own defaults back via `xml.etree.ElementTree` rather than hardcoding a second copy, so the spawned URDF and the `cheese_spawner` node's marker/geometry parameters can never drift out of sync with each other.
 
 ---
 
@@ -158,7 +169,7 @@ docker compose up -d
 
 ---
 
-## Run the Cell Display (current default)
+## Run the Cell Display (default)
 
 Brings up the composed cell — xArm6 + gripper, Orbbec Astra 2, and the conveyor belt — as a static scene published over TF and streamed to Foxglove. No Gazebo, no physics: `robot_state_publisher` + `joint_state_publisher` (constant zero pose) + `foxglove_bridge`.
 
@@ -185,9 +196,18 @@ docker exec -it ros2_dev bash -c "
 
 ---
 
-## Gazebo Classic Simulation (real rendered camera + browser GUI — being re-integrated)
+## Gazebo Classic Simulation
 
-The full simulation runs the cell inside Gazebo Classic 11 with the Orbbec camera's actual rendered RGB-D output flowing into Foxglove, and the Gazebo GUI viewable in a browser tab via noVNC. This pipeline previously worked end-to-end; its launch package (`cell_bringup`) was removed during the workspace reorg and needs re-creating under `bringup/`. The container, Dockerfile, and reasoning are unchanged — see **[docs/GAZEBO_SIMULATION.md](docs/GAZEBO_SIMULATION.md)** for the architecture, launch sequencing, and the camera topics it publishes:
+Same launch file, one extra argument: `use_gazebo:=true` also starts `gzserver`, spawns the composed cell into it, and starts `estica_gazebo`'s `cheese_spawner` node, which spawns cheese slices onto the belt on a random 4–6 s interval and scripts their motion along the belt at constant speed. The Orbbec camera's actual rendered RGB-D output flows into Foxglove exactly as it would from real hardware — see [docs/PACKAGE_STRUCTURE.md §8](docs/PACKAGE_STRUCTURE.md) for why simulation isn't mocked.
+
+```bash
+docker exec -it ros2_dev bash -c "
+  source /opt/ros/humble/setup.bash &&
+  source /ros2_ws/install/setup.bash &&
+  ros2 launch estica_bringup cell_display.launch.py use_gazebo:=true"
+```
+
+This is **headless only** — there is no interactive Gazebo GUI in the current pipeline (no noVNC/`gzclient`, unlike the previous `cell_bringup`-package version documented in [docs/GAZEBO_SIMULATION.md](docs/GAZEBO_SIMULATION.md), which hasn't been rebuilt yet under the new layout). Everything is visible through Foxglove instead:
 
 | Topic | Content |
 |---|---|
@@ -196,6 +216,7 @@ The full simulation runs the cell inside Gazebo Classic 11 with the Orbbec camer
 | `/camera/depth/image_raw` | Depth image |
 | `/camera/depth/camera_info` | Depth camera intrinsics |
 | `/camera/depth/points` | XYZRGB point cloud |
+| `/cheese/markers` | `MarkerArray` mirroring each active cheese's pose, for a 3D-panel overview until real vision processing exists |
 
 The container must be built for `linux/amd64` (already set in `docker-compose.yml`) — Gazebo's apt dependency chain is broken on arm64.
 
@@ -243,6 +264,7 @@ docker compose down
 | Spawned robot flails/falls under gravity | No `ros2_control` controller is loaded; either add one, or set `<gazebo><static>true</static></gazebo>` to freeze physics |
 | noVNC: `does not provide an export named 'init_logging'` | Stale browser cache — hard refresh (Cmd+Shift+R) or use a private window |
 | `gzclient` hangs forever on **OrbStack** (stuck after `GuiIface.cc` warnings, 0% CPU, no window) | OrbStack amd64-emulation × Mesa software-OpenGL incompatibility, specific to the GUI render loop. Keep `rosetta: true` (disabling it makes `gzserver` itself crash with `LLVM ERROR: 64-bit code requested...`). The headless camera pipeline is unaffected. Use Docker Desktop if you need the interactive GUI. |
+| `gzserver` crashes (`SIGABRT`, `boost::shared_ptr<gazebo::physics::Base>::operator->(): Assertion 'px != 0' failed`) after a cheese despawns | `cheese_spawner`'s per-tick pose update was a two-hop async round trip (`GetEntityState` then `SetEntityState`); if a cheese got deleted while a stale `GetEntityState` reply was still in flight, the follow-up `SetEntityState` targeted an entity name Gazebo no longer had, and `gazebo_ros_state` dereferences the lookup without a null check. Fixed by checking the entity is still tracked as active before sending the follow-up request. |
 
 ---
 
@@ -252,12 +274,14 @@ docker compose down
 - [x] xArm6 URDF + gripper meshes integrated as ROS2 packages
 - [x] Robot model visualized and animated in Foxglove
 - [x] Gripper open/close animation working
-- [x] Workspace reorganized into layered package structure (`description/`, `bringup/`)
+- [x] Workspace reorganized into layered package structure (`description/`, `bringup/`, `simulation/`)
 - [x] Orbbec Astra 2 camera modeled and placed in the cell
 - [x] `cell_description` composes the full scene; static Foxglove display via `estica_bringup`
 - [x] Conveyor belt modeled (`conveyor_description`) and placed in the cell
-- [ ] Re-integrate the Gazebo Classic pipeline under `bringup/` (real rendered camera + noVNC GUI)
-- [ ] Container + cheese descriptions (`container_description`, `cheese_description`)
+- [x] Cheese slice modeled (`cheese_description`) — mass/inertia derived from batch dimensions
+- [x] Gazebo Classic pipeline re-integrated under `estica_bringup`/`estica_gazebo` (headless: real rendered camera, cheese spawning + scripted belt motion)
+- [ ] noVNC / `gzclient` browser GUI (previous `cell_bringup`-package pipeline had this; not yet rebuilt under the new layout)
+- [ ] `container_description` (placeholder — not yet modeled)
 - [ ] Point cloud processing (PCL — plane removal, clustering, 3D bounding box)
 - [ ] Camera-to-robot TF2 calibration
 - [ ] Conveyor state estimator (position tracking)
